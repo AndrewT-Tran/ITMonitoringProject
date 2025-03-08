@@ -1,0 +1,120 @@
+- name: Configure SSH login and hosts file on instances
+  hosts: all
+  become: yes
+  vars:
+    controller_ip: "237.84.2.178"
+    workstation1_ip: "89.207.132.170"
+    workstation2_ip: "237.84.2.178"
+    workstation3_ip: "89.207.132.170"
+    ssh_user: "ubuntu"
+    # Ideally, use a hashed password. For testing, this plain text is used.
+    ubuntu_password: "ubuntu"
+    workstations:
+      - "workstation1"
+      - "workstation2"
+      - "workstation3"
+
+  pre_tasks:
+    - name: Generate SSH key pair if missing
+      become_user: "{{ ssh_user }}"
+      shell: |
+        if [ ! -f /home/{{ ssh_user }}/.ssh/id_rsa ]; then
+          ssh-keygen -t rsa -b 4096 -f /home/{{ ssh_user }}/.ssh/id_rsa -N ""
+        fi
+      args:
+        executable: /bin/bash
+
+    - name: Copy SSH public key to workstations
+      authorized_key:
+        user: "{{ ssh_user }}"
+        key: "{{ lookup('file', '/home/{{ ssh_user }}/.ssh/id_rsa.pub') }}"
+        path: "/home/{{ ssh_user }}/.ssh/authorized_keys"
+        state: present
+      loop: "{{ workstations }}"
+
+  tasks:
+    - name: Set system hostname
+      command: "hostname {{ ansible_hostname }}"
+
+    - name: Configure the hosts file
+      copy:
+        dest: /etc/hosts
+        content: |
+          {{ controller_ip }} controller
+          {{ workstation1_ip }} workstation1
+          {{ workstation2_ip }} workstation2
+          {{ workstation3_ip }} workstation3
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Permit root login in sshd_config
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PermitRootLogin"
+        line: "PermitRootLogin yes"
+        state: present
+
+    - name: Enable password authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PasswordAuthentication"
+        line: "PasswordAuthentication yes"
+        state: present
+
+    - name: Comment out KbdInteractiveAuthentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?KbdInteractiveAuthentication"
+        line: "#KbdInteractiveAuthentication no"
+        state: present
+
+    - name: Disable StrictHostKeyChecking (client-side)
+      lineinfile:
+        path: /etc/ssh/ssh_config
+        regexp: "^#?StrictHostKeyChecking"
+        line: "StrictHostKeyChecking no"
+        state: present
+
+    - name: Restart SSH service
+      service:
+        name: ssh
+        state: restarted
+
+    - name: Restart SSHD service
+      service:
+        name: sshd
+        state: restarted
+
+- name: Set passwords and SSH keys on controller
+  hosts: controller
+  become: yes
+  vars:
+    ssh_user: "ubuntu"
+    ubuntu_password: "ubuntu"
+    workstations:
+      - "workstation1"
+      - "workstation2"
+      - "workstation3"
+  tasks:
+    - name: Set password for ubuntu user
+      user:
+        name: "{{ ssh_user }}"
+        password: "{{ ubuntu_password }}"
+
+    - name: Ensure SSH key pair exists for ubuntu user
+      become_user: "{{ ssh_user }}"
+      shell: |
+        if [ ! -f /home/{{ ssh_user }}/.ssh/id_rsa ]; then
+          ssh-keygen -t rsa -b 4096 -f /home/{{ ssh_user }}/.ssh/id_rsa -N ""
+        fi
+      args:
+        executable: /bin/bash
+
+    - name: Copy SSH public key to workstations
+      authorized_key:
+        user: "{{ ssh_user }}"
+        key: "{{ lookup('file', '/home/{{ ssh_user }}/.ssh/id_rsa.pub') }}"
+        path: "/home/{{ ssh_user }}/.ssh/authorized_keys"
+        state: present
+      loop: "{{ workstations }}"

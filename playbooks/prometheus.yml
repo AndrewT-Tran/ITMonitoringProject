@@ -1,0 +1,73 @@
+- name: Install Prometheus
+  hosts: monitoring
+  become: true
+  vars:
+    prometheus_version: "2.52.0" # Replace with the latest version
+    prometheus_install_dir: "/opt/prometheus"
+    prometheus_user: "prometheus"
+
+  tasks:
+    - name: Create Prometheus user
+      user:
+        name: "{{ prometheus_user }}"
+        system: false
+        shell: /sbin/nologin
+        createhome: false
+
+    - name: Ensure Prometheus directory exists
+      file:
+        path: "{{ prometheus_install_dir }}"
+        state: directory
+        owner: "{{ prometheus_user }}"
+        group: "{{ prometheus_user }}"
+        mode: "0755"
+
+    - name: Download Prometheus
+      get_url:
+        url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+        dest: /tmp/prometheus.tar.gz
+        validate_certs: yes
+
+    - name: Extract Prometheus
+      unarchive:
+        src: /tmp/prometheus.tar.gz
+        dest: "{{ prometheus_install_dir }}"
+        remote_src: true
+        extra_opts: "--strip-components=1"
+
+    - name: Set correct permissions for Prometheus directory
+      file:
+        path: "{{ prometheus_install_dir }}"
+        owner: "{{ prometheus_user }}"
+        group: "{{ prometheus_user }}"
+        recurse: true
+
+    - name: Create Prometheus systemd service file
+      copy:
+        dest: /etc/systemd/system/prometheus.service
+        content: |
+          [Unit]
+          Description=Prometheus Monitoring
+          After=network.target
+
+          [Service]
+          User={{ prometheus_user }}
+          Group={{ prometheus_user }}
+          Type=simple
+          ExecStart={{ prometheus_install_dir }}/prometheus \
+            --config.file={{ prometheus_install_dir }}/prometheus.yml \
+            --storage.tsdb.path={{ prometheus_install_dir }}/data
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+    - name: Enable and start Prometheus service
+      ansible.builtin.systemd:
+        name: prometheus
+        state: started
+        enabled: yes

@@ -1,0 +1,41 @@
+- name: Install and Configure Grafana
+  hosts: monitoring
+  become: yes
+  vars:
+    grafana_version: "11.5.2"  # Replace with the latest version
+    grafana_deb_url: "https://dl.grafana.com/enterprise/release/grafana-enterprise_{{ grafana_version }}_amd64.deb"
+    grafana_install_dir: "/etc/grafana"
+
+  tasks:
+    - name: Install required dependencies
+      apt:
+        name: apt-transport-https
+        state: present
+        update_cache: yes
+
+    - name: Download Grafana
+      get_url:
+        url: "{{ grafana_deb_url }}"
+        dest: /tmp/grafana.deb
+
+    - name: Install Grafana
+      apt:
+        deb: /tmp/grafana.deb
+
+    - name: Ensure Grafana service is enabled and running
+      systemd:
+        name: grafana-server
+        state: started
+        enabled: yes
+
+    - name: Open Firewall Port for Grafana (Port 3000)
+      ufw:
+        rule: allow
+        port: "3000"
+        proto: tcp
+      ignore_errors: yes  # If UFW is not installed, ignore the error
+
+    - name: Clean up installation files
+      file:
+        path: /tmp/grafana.deb
+        state: absent
